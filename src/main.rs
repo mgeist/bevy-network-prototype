@@ -28,22 +28,32 @@ fn main() {
     SimpleLogger::new().with_level(LevelFilter::Info).init().unwrap();
     let is_server = IsServer(parse_args());
 
-    App::build()
-        .add_plugins(DefaultPlugins)
+    let mut app = App::build();
+
+    if is_server.0 {
+        app
+            .add_plugins(MinimalPlugins);
+    } else {
+        app
+            .add_plugins(DefaultPlugins)
+            .insert_resource(ClearColor(Color::rgb(0.5, 0.5, 0.5)))
+            .add_system(client_setup.system())
+            .add_system_set(
+                SystemSet::new()
+                    .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
+                    .with_system(player_movement.system())
+            )
+            .add_system_set(
+                SystemSet::new()
+                    .with_run_criteria(FixedTimestep::step(2.0))
+                    .with_system(send_packets.system())
+            );
+    }
+
+    app
         .add_plugin(NetworkingPlugin::default())
-        .insert_resource(ClearColor(Color::rgb(0.5, 0.5, 0.5)))
+        .add_startup_system(network_setup.system())
         .insert_resource(is_server)
-        .add_startup_system(setup.system())
-        .add_system_set(
-            SystemSet::new()
-                .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
-                .with_system(player_movement.system())
-        )
-        .add_system_set(
-            SystemSet::new()
-                .with_run_criteria(FixedTimestep::step(1.0))
-                .with_system(send_packets.system())
-        )
         .add_system(handle_packets.system())
         .run();
 }
@@ -66,11 +76,24 @@ fn parse_args() -> bool {
     return is_server;
 }
 
-fn setup(
-    mut commands: Commands,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+fn network_setup(
     mut net: ResMut<NetworkResource>,
     is_server: Res<IsServer>,
+) {
+    let ip_address = find_my_ip_address().expect("Unable to find IP address.");
+    let server_address = SocketAddr::new(ip_address, SERVER_PORT);
+    if is_server.0 {
+        info!("Starting as server.");
+        net.listen(server_address, None, None);
+    } else {
+        info!("Starting as client.");
+        net.connect(server_address);
+    }
+}
+
+fn client_setup(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 
@@ -81,16 +104,6 @@ fn setup(
             ..Default::default()
         })
         .insert(Player);
-
-    let ip_address = find_my_ip_address().expect("Unable to find IP address.");
-    let server_address = SocketAddr::new(ip_address, SERVER_PORT);
-    if is_server.0 {
-        info!("Starting as server.");
-        net.listen(server_address, None, None);
-    } else {
-        info!("Starting as client.");
-        net.connect(server_address);
-    }
 }
 
 fn player_movement(
