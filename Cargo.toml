@@ -8,3 +8,6 @@ edition = "2018"
 
 [dependencies]
 bevy = "0.5"
+bevy_networking_turbulence = "0.3"
+log = "0.4"
+simple_logger = "1.11"

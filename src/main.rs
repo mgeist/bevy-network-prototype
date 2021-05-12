@@ -4,28 +4,73 @@ use bevy::{
     prelude::*,
     render::pass::ClearColor,
 };
+use bevy_networking_turbulence::{
+    find_my_ip_address,
+    NetworkEvent,
+    NetworkingPlugin,
+    NetworkResource,
+    Packet,
+};
+use log::{LevelFilter, info, warn};
+use simple_logger::SimpleLogger;
+
+use std::net::SocketAddr;
 
 const TIME_STEP: f32 = 1.0 / 60.0;
 const MOVEMENT_SPEED: f32 = 300.0;
+const SERVER_PORT: u16 = 18321;
 
 struct Player;
 
+struct IsServer(bool);
+
 fn main() {
+    SimpleLogger::new().with_level(LevelFilter::Info).init().unwrap();
+    let is_server = IsServer(parse_args());
+
     App::build()
         .add_plugins(DefaultPlugins)
+        .add_plugin(NetworkingPlugin::default())
         .insert_resource(ClearColor(Color::rgb(0.5, 0.5, 0.5)))
+        .insert_resource(is_server)
         .add_startup_system(setup.system())
         .add_system_set(
             SystemSet::new()
                 .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
                 .with_system(player_movement.system())
         )
+        .add_system_set(
+            SystemSet::new()
+                .with_run_criteria(FixedTimestep::step(1.0))
+                .with_system(send_packets.system())
+        )
+        .add_system(handle_packets.system())
         .run();
+}
+
+fn parse_args() -> bool {
+    let mut is_server = true;
+
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 2 {
+        return is_server;
+    }
+    let arg = &args[1];
+    is_server = match arg.as_str() {
+        "--server" | "-s" => true,
+        "--client" | "-c" => false,
+        _ => panic!("Invalid option provided. Use one of the following: --server (-s), --client (-c)."),
+    };
+
+    return is_server;
 }
 
 fn setup(
     mut commands: Commands,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut net: ResMut<NetworkResource>,
+    is_server: Res<IsServer>,
 ) {
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 
@@ -36,6 +81,16 @@ fn setup(
             ..Default::default()
         })
         .insert(Player);
+
+    let ip_address = find_my_ip_address().expect("Unable to find IP address.");
+    let server_address = SocketAddr::new(ip_address, SERVER_PORT);
+    if is_server.0 {
+        info!("Starting as server.");
+        net.listen(server_address, None, None);
+    } else {
+        info!("Starting as client.");
+        net.connect(server_address);
+    }
 }
 
 fn player_movement(
@@ -59,4 +114,43 @@ fn player_movement(
         *translation += move_delta.extend(0.0);
     }
 
+}
+
+fn send_packets(
+    mut net: ResMut<NetworkResource>,
+    is_server: Res<IsServer>,
+) {
+    if is_server.0 {
+        return;
+    }
+
+    info!("Sending PING.");
+    net.broadcast(Packet::from("PING"));
+}
+
+fn handle_packets(
+    mut net: ResMut<NetworkResource>,
+    mut reader: EventReader<NetworkEvent>,
+    time: Res<Time>,
+) {
+    for event in reader.iter() {
+        match event {
+            NetworkEvent::Packet(handle, packet) => {
+                let message = String::from_utf8_lossy(packet);
+                info!("Received packet on {}: {}", handle, message);
+                if message == "PING" {
+                    let message = format!("PONG @ {}", time.seconds_since_startup());
+                    match net.send(*handle, Packet::from(message)) {
+                        Ok(()) => {
+                            info!("Responded with PONG.");
+                        }
+                        Err(error) => {
+                            warn!("Error responding to PING: {}", error);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }
