@@ -1,17 +1,10 @@
 use bevy::prelude::*;
-use bevy_networking_turbulence::{
-    NetworkEvent,
-    NetworkResource,
-};
+use bevy_networking_turbulence::{NetworkEvent, NetworkResource};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Player,
-    PlayerMovement,
-    server::{
-        GameStateMessage,
-        ServerMessage,
-    },
+    server::{GameStateMessage, ServerMessage},
+    Player, PlayerMovement,
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -32,7 +25,6 @@ pub struct Frame(u32);
 pub fn handle_packets(
     mut net: ResMut<NetworkResource>,
     mut network_events: EventReader<NetworkEvent>,
-
 ) {
     for event in network_events.iter() {
         match event {
@@ -44,22 +36,22 @@ pub fn handle_packets(
                             if let Some(msg) = msg {
                                 log::error!("Unable to send Join: {:?}", msg);
                             }
-                        },
+                        }
                         Err(err) => {
                             log::error!("Unable to send Join: {:?}", err);
                         }
                     }
                 }
-            },
+            }
             NetworkEvent::Disconnected(handle) => {
                 log::warn!("DISCONNECTED: {}", handle);
-            },
+            }
             NetworkEvent::Packet(handle, packet) => {
                 log::warn!("PACKET FROM {}: {:?}", handle, packet);
-            },
+            }
             NetworkEvent::Error(handle, err) => {
                 log::warn!("ERROR ON {}: {:?}", handle, err);
-            },
+            }
         }
     }
 }
@@ -69,7 +61,12 @@ pub fn handle_messages(
     mut net: ResMut<NetworkResource>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut clients_server_handle: ResMut<ClientsServerState>,
-    mut player_query: Query<(&ServerEntityId, &mut PlayerMovement, &mut Transform, &mut Frame)>
+    mut player_query: Query<(
+        &ServerEntityId,
+        &mut PlayerMovement,
+        &mut Transform,
+        &mut Frame,
+    )>,
 ) {
     for (handle, connection) in net.connections.iter_mut() {
         let channels = connection.channels().unwrap();
@@ -96,7 +93,11 @@ pub fn handle_messages(
 
         while let Some(mut state_message) = channels.recv::<GameStateMessage>() {
             let message_frame = state_message.frame;
-            log::debug!("GameStateMessage received on {}: {:?}", handle, state_message);
+            log::debug!(
+                "GameStateMessage received on {}: {:?}",
+                handle,
+                state_message
+            );
 
             for &server_entity_id in state_message.new_players.iter() {
                 let is_my_entity = server_entity_id == clients_server_handle.handle;
@@ -116,12 +117,18 @@ pub fn handle_messages(
                     .insert(PlayerMovement(Vec2::ZERO));
             }
 
-            for (server_entity_id, mut movement, mut transform, mut frame) in player_query.iter_mut() {
+            for (server_entity_id, mut movement, mut transform, mut frame) in
+                player_query.iter_mut()
+            {
                 if frame.0 > message_frame {
                     continue;
                 }
 
-                if let Some(index) = state_message.players.iter().position(|&p| p.0 == server_entity_id.0) {
+                if let Some(index) = state_message
+                    .players
+                    .iter()
+                    .position(|&p| p.0 == server_entity_id.0)
+                {
                     let (_id, movement_vec2, translation) = state_message.players.remove(index);
 
                     frame.0 = message_frame;
@@ -133,14 +140,14 @@ pub fn handle_messages(
     }
 }
 
-pub fn player_movement(
-    mut net: ResMut<NetworkResource>,
-    keyboard_input: Res<Input<KeyCode>>,
-) {
-    let x_axis = -(keyboard_input.pressed(KeyCode::A) as i8)
-        + (keyboard_input.pressed(KeyCode::D) as i8);
-    let y_axis = -(keyboard_input.pressed(KeyCode::S) as i8)
-        + (keyboard_input.pressed(KeyCode::W) as i8);
+pub fn player_movement(mut net: ResMut<NetworkResource>, keyboard_input: Res<Input<KeyCode>>) {
+    let x_axis =
+        -(keyboard_input.pressed(KeyCode::A) as i8) + (keyboard_input.pressed(KeyCode::D) as i8);
+    let y_axis =
+        -(keyboard_input.pressed(KeyCode::S) as i8) + (keyboard_input.pressed(KeyCode::W) as i8);
 
-    net.broadcast_message(ClientMessage::Direction(Vec2::new(x_axis as f32, y_axis as f32)));
+    net.broadcast_message(ClientMessage::Direction(Vec2::new(
+        x_axis as f32,
+        y_axis as f32,
+    )));
 }

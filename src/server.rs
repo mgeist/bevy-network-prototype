@@ -1,19 +1,9 @@
 use bevy::prelude::*;
-use bevy_networking_turbulence::{
-    NetworkEvent,
-    NetworkResource,
-};
+use bevy_networking_turbulence::{NetworkEvent, NetworkResource};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    ControllingHandle,
-    PlayerMovement,
-};
-use crate::{
-    client::ClientMessage,
-    MOVEMENT_SPEED,
-    SERVER_TIME_STEP,
-};
+use crate::{client::ClientMessage, MOVEMENT_SPEED, SERVER_TIME_STEP};
+use crate::{ControllingHandle, PlayerMovement};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GameStateMessage {
@@ -42,20 +32,19 @@ pub fn handle_packets(
             NetworkEvent::Connected(handle) => {
                 if let Some(connection) = net.connections.get_mut(handle) {
                     if let Some(remote_address) = connection.remote_address() {
-                        log::debug!("Incoming connection on {} from {}", handle, remote_address);
-
+                        log::info!("Incoming connection on {} from {}", handle, remote_address);
                     }
                 }
-            },
+            }
             NetworkEvent::Disconnected(handle) => {
-                log::warn!("DISCONNECTED: {}", handle);
-            },
+                log::info!("DISCONNECTED: {}", handle);
+            }
             NetworkEvent::Packet(handle, packet) => {
-                log::warn!("PACKET FROM {}: {:?}", handle, packet);
-            },
+                log::info!("PACKET FROM {}: {:?}", handle, packet);
+            }
             NetworkEvent::Error(handle, err) => {
-                log::warn!("ERROR ON {}: {:?}", handle, err);
-            },
+                log::info!("ERROR ON {}: {:?}", handle, err);
+            }
         }
     }
 }
@@ -64,7 +53,7 @@ pub fn handle_messages(
     mut commands: Commands,
     mut net: ResMut<NetworkResource>,
     mut network_broadcast: ResMut<NetworkBroadcast>,
-    mut player_query: Query<(&ControllingHandle, &mut PlayerMovement)>
+    mut player_query: Query<(&ControllingHandle, &mut PlayerMovement)>,
 ) {
     let mut responses = Vec::<(u32, ServerMessage)>::new();
 
@@ -84,7 +73,7 @@ pub fn handle_messages(
                         Transform::identity(),
                     ));
                     network_broadcast.new_players.push(*handle);
-                },
+                }
                 ClientMessage::Direction(dir) => {
                     for (controlling_handle, mut movement) in player_query.iter_mut() {
                         if controlling_handle.0 == *handle {
@@ -103,7 +92,7 @@ pub fn handle_messages(
                 if let Some(msg) = msg {
                     log::error!("Unable to send Joined: {:?}", msg);
                 }
-            },
+            }
             Err(err) => {
                 log::error!("Unable to send Joined: {:?}", err);
             }
@@ -125,15 +114,15 @@ pub fn state_broadcast(
     state.frame += 1;
 
     for (entity, movement, transform) in player_query.iter() {
-        message.players.push((entity.id(), movement.0, transform.translation))
+        message
+            .players
+            .push((entity.id(), movement.0, transform.translation))
     }
 
     net.broadcast_message(message);
 }
 
-pub fn compute_movement(
-    mut player_query: Query<(&PlayerMovement, &mut Transform)>,
-) {
+pub fn compute_movement(mut player_query: Query<(&PlayerMovement, &mut Transform)>) {
     for (movement, mut transform) in player_query.iter_mut() {
         let mut delta = movement.0;
 

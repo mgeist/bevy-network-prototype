@@ -1,4 +1,3 @@
-
 use bevy::{
     app::{ScheduleRunnerPlugin, ScheduleRunnerSettings},
     core::FixedTimestep,
@@ -6,36 +5,23 @@ use bevy::{
     render::pass::ClearColor,
 };
 use bevy_networking_turbulence::{
-    ConnectionChannelsBuilder,
-    find_my_ip_address,
-    MessageChannelMode,
-    MessageChannelSettings,
-    NetworkingPlugin,
-    NetworkResource,
+    find_my_ip_address, ConnectionChannelsBuilder, MessageChannelMode, MessageChannelSettings,
+    NetworkResource, NetworkingPlugin,
 };
-use log::{LevelFilter};
+use log::LevelFilter;
 use simple_logger::SimpleLogger;
-use std::{
-    net::SocketAddr,
-    time::Duration,
-};
+use std::{net::SocketAddr, time::Duration};
 
 mod client;
 mod server;
-use client::{
-    ClientMessage,
-    ClientsServerState,
-};
-use server::{
-    GameStateMessage,
-    NetworkBroadcast,
-    ServerMessage,
-};
+use client::{ClientMessage, ClientsServerState};
+use server::{GameStateMessage, NetworkBroadcast, ServerMessage};
 
 // TODO:
 //  - Need to send "existing players" on join, rather a complete gamestate
 
-const SERVER_TIME_STEP: f32 = 1.0 / 20.0;
+const SERVER_TIME_STEP: f32 = 1.0;
+// const SERVER_TIME_STEP: f32 = 1.0 / 20.0;
 const TIME_STEP: f32 = 1.0 / 60.0;
 const MOVEMENT_SPEED: f32 = 300.0;
 const SERVER_PORT: u16 = 18321;
@@ -70,26 +56,27 @@ pub struct ControllingHandle(u32);
 pub struct IsServer(bool);
 
 fn main() {
-    SimpleLogger::new().with_level(LevelFilter::Info).init().unwrap();
+    SimpleLogger::new()
+        .with_level(LevelFilter::Info)
+        .init()
+        .unwrap();
     let is_server = IsServer(parse_args());
 
     let mut app = App::build();
 
     if is_server.0 {
-        app
-            .insert_resource(
-                ScheduleRunnerSettings::run_loop(Duration::from_secs_f64(SERVER_TIME_STEP as f64))
-            )
-            .add_plugins(MinimalPlugins)
-            .add_plugin(ScheduleRunnerPlugin::default())
-            .init_resource::<NetworkBroadcast>()
-            .add_system(server::handle_packets.system())
-            .add_system(server::compute_movement.system())
-            .add_system_to_stage(CoreStage::PreUpdate, server::handle_messages.system())
-            .add_system_to_stage(CoreStage::PostUpdate, server::state_broadcast.system());
+        app.insert_resource(ScheduleRunnerSettings::run_loop(Duration::from_secs_f64(
+            SERVER_TIME_STEP as f64,
+        )))
+        .add_plugins(MinimalPlugins)
+        .add_plugin(ScheduleRunnerPlugin::default())
+        .init_resource::<NetworkBroadcast>()
+        .add_system(server::handle_packets.system())
+        .add_system(server::compute_movement.system())
+        .add_system_to_stage(CoreStage::PreUpdate, server::handle_messages.system())
+        .add_system_to_stage(CoreStage::PostUpdate, server::state_broadcast.system());
     } else {
-        app
-            .add_plugins(DefaultPlugins)
+        app.add_plugins(DefaultPlugins)
             .init_resource::<ClientsServerState>()
             .insert_resource(ClearColor(Color::rgb(0.5, 0.5, 0.5)))
             .add_system(client_setup.system())
@@ -97,13 +84,16 @@ fn main() {
             .add_system_to_stage(CoreStage::PreUpdate, client::handle_messages.system())
             .add_system_set(
                 SystemSet::new()
-                    .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
-                    .with_system(client::player_movement.system())
+                    .with_run_criteria(FixedTimestep::step(SERVER_TIME_STEP as f64))
+                    .with_system(client::player_movement.system()),
             );
     }
 
-    app
-        .add_plugin(NetworkingPlugin::default())
+    let networking_plugin = NetworkingPlugin {
+        idle_timeout_ms: Some(3000),
+        ..Default::default()
+    };
+    app.add_plugin(networking_plugin)
         .add_startup_system(network_setup.system())
         .insert_resource(is_server)
         .run();
@@ -121,16 +111,15 @@ fn parse_args() -> bool {
     is_server = match arg.as_str() {
         "--server" | "-s" => true,
         "--client" | "-c" => false,
-        _ => panic!("Invalid option provided. Use one of the following: --server (-s), --client (-c)."),
+        _ => panic!(
+            "Invalid option provided. Use one of the following: --server (-s), --client (-c)."
+        ),
     };
 
-    return is_server;
+    is_server
 }
 
-fn network_setup(
-    mut net: ResMut<NetworkResource>,
-    is_server: Res<IsServer>,
-) {
+fn network_setup(mut net: ResMut<NetworkResource>, is_server: Res<IsServer>) {
     let ip_address = find_my_ip_address().expect("Unable to find IP address.");
     let server_address = SocketAddr::new(ip_address, SERVER_PORT);
 
@@ -148,12 +137,11 @@ fn network_setup(
 
     if is_server.0 {
         net.listen(server_address, None, None);
-        log::info!("Starting as server.");
+        log::info!("Starting as server on {}.", server_address);
     } else {
         net.connect(server_address);
-        log::info!("Starting as client.");
+        log::info!("Starting as client on {}.", server_address);
     }
-
 }
 
 fn client_setup(mut commands: Commands) {
